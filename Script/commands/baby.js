@@ -4,21 +4,24 @@ const {
   removeTeach,
   listTeach,
   setUserTone,
-  getUserTone
+  getUserTone,
+  styleTeach,
+  styleList,
+  styleRemove
 } = require('../../utils/conversation');
 
 module.exports.config = {
   name: 'baby',
-  version: '7.1.0',
+  version: '7.2.0',
   credits: 'Dipto + Arena.ai',
   cooldowns: 1,
   hasPermssion: 0,
-  description: 'Conversational chat with teach/remove/list support and offline fallback',
+  description: 'Conversational chat with teach/styleteach/remove/list/tone support and offline fallback',
   commandCategory: 'chat',
   category: 'chat',
   usePrefix: true,
   prefix: true,
-  usages: 'baby [message] | teach question - reply1, reply2 | remove question | list | tone male/female/neutral'
+  usages: 'baby [message] | teach question - reply1, reply2 | styleteach phrase | stylelist | styleremove phrase | remove question | list | tone male/female/neutral'
 };
 
 function pushHandleReply(api, event, info, reply) {
@@ -72,10 +75,17 @@ module.exports.run = async function ({ api, event, args, Users }) {
       return api.sendMessage(`🧠 Local taught messages: ${listTeach()}\n🎭 Your chat tone: ${tone}`, event.threadID, event.messageID);
     }
 
+    if (text === 'stylelist') {
+      const data = styleList(event.senderID);
+      const header = `🎨 Your style phrases (${data.count}/${data.limit}):`;
+      const body = data.count ? data.phrases.map((p, i) => `${i + 1}. ${p}`).join('\n') : 'তুমি এখনো কোনো style phrase শেখাও নি।';
+      return api.sendMessage(`${header}\n${body}`, event.threadID, event.messageID);
+    }
+
     if (text.startsWith('tone ')) {
       const tone = text.replace(/^tone\s+/i, '').trim();
       const result = setUserTone(event.senderID, tone);
-      return api.sendMessage(`${result.message}\nTip: tone female হলে শুধু আপনার ID-র জন্য softer/romantic style হবে; unknown users safe neutral থাকবে।`, event.threadID, event.messageID);
+      return api.sendMessage(`${result.message}\nTip: tone female হলে শুধু আপনার ID-র জন্য softer style হবে; male/unknown users safe neutral থাকবে।`, event.threadID, event.messageID);
     }
 
     if (text.startsWith('remove ') || text.startsWith('rm ')) {
@@ -84,10 +94,22 @@ module.exports.run = async function ({ api, event, args, Users }) {
       return api.sendMessage(result.message, event.threadID, event.messageID);
     }
 
+    if (text.startsWith('styleremove ')) {
+      const phrase = raw.replace(/^styleremove\s+/i, '');
+      const result = styleRemove(event.senderID, phrase);
+      return api.sendMessage(result.message, event.threadID, event.messageID);
+    }
+
     if (text.startsWith('teach ')) {
       const payload = raw.replace(/^teach\s+/i, '');
       const [question, replies] = payload.split(' - ');
       const result = teach(question, replies, event.senderID);
+      return api.sendMessage(result.message, event.threadID, event.messageID);
+    }
+
+    if (text.startsWith('styleteach ')) {
+      const phrase = raw.replace(/^styleteach\s+/i, '');
+      const result = styleTeach(event.senderID, phrase);
       return api.sendMessage(result.message, event.threadID, event.messageID);
     }
 

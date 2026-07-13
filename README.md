@@ -38,25 +38,29 @@ You can also provide credentials through hosting secrets as `FB_EMAIL`, `FB_PASS
 
 - `npm start` — start dashboard + bot
 - `npm run login:setup` — save encrypted login credentials
-- `npm run check` — syntax-check JavaScript files
+- `npm run check` — syntax-check JavaScript files, validate JSON files, command export smoke checks, sample conversation smoke checks, and run `npm audit --omit=dev --audit-level=high`
 - `npm test` — same as `npm run check`
 
 ## Conversation / AI replies
 
-The `/baby`, `/ai`, `/gpt`, and `/flatter` commands now share a no-API conversation engine tuned for fun/chাটুকারিতা:
+The `/baby`, `/ai`, `/gpt`, and `/flatter` commands share a **no-API local conversation engine** tuned for fun/casual Bangla-English chatting:
 
-- local Bangla/English fallback replies work without any API key
-- replies are playful, flattering, and conversation-friendly by default
-- lightweight name-based tone detection uses only known name hints; unknown/ambiguous names stay neutral to avoid wrong romantic replies
-- likely female names get softer/flirty replies; likely male names get casual respect/friend style without overusing “ভাই”
-- users can override their own tone with `/baby tone female`, `/baby tone male`, or `/baby tone neutral`
-- `/flatter [name/text]` generates premium compliments
+- Local Bangla/English fallback replies work without any API key
+- Replies are casual and human-like (e.g. "কিরে কি অবস্থা", "আচ্ছা বুঝলাম, তারপর?", "সত্যি নাকি? একটু খুলে বল তো") instead of robotic AI templates
+- Generic or random text always gets a reply; the bot never stays silent
+- Lightweight name-based tone detection uses only known name hints; unknown/ambiguous names stay neutral
+- Likely female names get softer/flirty replies; likely male names get casual friend style without overusing “ভাই”
+- Users can override their own tone with `/baby tone female`, `/baby tone male`, or `/baby tone neutral`
+- `/flatter [name/text]` generates casual compliments
 - `/whoami` explains Fun Boy's fun/chat personality
 - `/baby teach question - reply1, reply2` stores local taught replies in `Script/commands/cache/conversation-teach.json`
+- `/baby styleteach [phrase]` teaches the bot your own natural phrase style (max 80 phrases per user)
+- `/baby stylelist` shows your saved style phrases
+- `/baby styleremove [phrase]` removes one of your saved style phrases
 - `/baby remove question` removes a taught message
 - `/baby list` shows the local teach count
-- optional advanced AI: set `OPENAI_API_KEY` or `CONVERSATION_API_URL` in hosting secrets
-- optional old baby remote API: set `ENABLE_BABY_API=1`
+- Optional advanced AI: set `OPENAI_API_KEY` or `CONVERSATION_API_URL` in hosting secrets
+- Optional old baby remote API: set `ENABLE_BABY_API=1`
 
 Auto conversation is triggered when a message starts with `baby`, `bby`, `bot`, `fun boy`, or mentions the bot.
 
@@ -68,6 +72,7 @@ The launcher is tuned for small hosts by default:
 - RSS restart guard: `MEMORY_RSS_LIMIT_MB=460`
 - Heap restart guard: `MEMORY_HEAP_LIMIT_MB=352`
 - Native allocator arenas: `MALLOC_ARENA_MAX=2`
+- Conversation engine keeps reply banks small and lightweight so it runs comfortably in 512MB RAM
 
 You can override these as hosting environment variables if your platform needs different limits. When memory approaches the limit the bot logs a warning; if it crosses the limit it exits with code `78` so `Ullash.js` can restart it cleanly instead of letting the host kill it.
 
