@@ -4,6 +4,7 @@ const path = require('path');
 const STORE_PATH = path.join(__dirname, '..', 'Script', 'commands', 'cache', 'conversation-teach.json');
 const MAX_HISTORY_USERS = Number(process.env.CONVERSATION_MAX_USERS || 500);
 const MAX_HISTORY_ITEMS = Number(process.env.CONVERSATION_MAX_HISTORY || 8);
+const MAX_STYLE_PHRASES_PER_USER = Number(process.env.CONVERSATION_MAX_STYLES || 80);
 const REMOTE_TIMEOUT_MS = Number(process.env.CONVERSATION_TIMEOUT_MS || 12000);
 const ENABLE_REMOTE_BABY_API = process.env.ENABLE_BABY_API === '1';
 
@@ -24,16 +25,24 @@ function ensureStoreDir() {
   fs.mkdirSync(path.dirname(STORE_PATH), { recursive: true });
 }
 
+function defaultStore() {
+  return { version: 1, pairs: {}, stats: {}, profiles: {}, styles: {} };
+}
+
 function loadTeachStore() {
   if (cachedTeachStore) return cachedTeachStore;
   try {
-    cachedTeachStore = JSON.parse(fs.readFileSync(STORE_PATH, 'utf8'));
+    const data = JSON.parse(fs.readFileSync(STORE_PATH, 'utf8'));
+    cachedTeachStore = {
+      version: Number(data.version) || 1,
+      pairs: data.pairs || {},
+      stats: data.stats || {},
+      profiles: data.profiles || {},
+      styles: data.styles || {}
+    };
   } catch (_) {
-    cachedTeachStore = { version: 1, pairs: {}, stats: {} };
+    cachedTeachStore = defaultStore();
   }
-  cachedTeachStore.pairs ||= {};
-  cachedTeachStore.stats ||= {};
-  cachedTeachStore.profiles ||= {};
   return cachedTeachStore;
 }
 
@@ -60,6 +69,7 @@ function getHistory(userID) {
 }
 
 function pick(items) {
+  if (!Array.isArray(items) || items.length === 0) return '';
   return items[Math.floor(Math.random() * items.length)];
 }
 
@@ -119,6 +129,51 @@ function listTeach() {
   return Object.keys(store.pairs).length;
 }
 
+function styleTeach(userID, phrase) {
+  const id = String(userID || 'unknown');
+  const clean = safeBody(phrase);
+  if (!clean) return { ok: false, message: 'Format: styleteach [তোমার নিজের স্বাভাবিক বাক্য]' };
+  if (clean.length > 300) return { ok: false, message: 'Phrase টি ৩০০ অক্ষরের মধ্যে রাখো।' };
+
+  const store = loadTeachStore();
+  store.styles ||= {};
+  store.styles[id] ||= [];
+  if (store.styles[id].includes(clean)) {
+    return { ok: false, message: 'এই phrase আগে থেকেই আছে।' };
+  }
+  if (store.styles[id].length >= MAX_STYLE_PHRASES_PER_USER) {
+    store.styles[id].shift();
+  }
+  store.styles[id].push(clean);
+  saveTeachStore();
+  return { ok: true, message: `✅ Style phrase শেখানো হয়েছে (${store.styles[id].length}/${MAX_STYLE_PHRASES_PER_USER}): ${clean}` };
+}
+
+function styleList(userID) {
+  const id = String(userID || 'unknown');
+  const store = loadTeachStore();
+  const list = store.styles?.[id] || [];
+  return { count: list.length, phrases: list.slice(), limit: MAX_STYLE_PHRASES_PER_USER };
+}
+
+function styleRemove(userID, phrase) {
+  const id = String(userID || 'unknown');
+  const clean = safeBody(phrase);
+  const store = loadTeachStore();
+  const list = store.styles?.[id] || [];
+  const idx = list.findIndex((p) => lower(p) === lower(clean));
+  if (idx === -1) return { ok: false, message: 'এই phrase তোমার list-এ নেই।' };
+  list.splice(idx, 1);
+  saveTeachStore();
+  return { ok: true, message: '✅ Style phrase সরানো হয়েছে।' };
+}
+
+function getUserStylePhrase(userID) {
+  const id = String(userID || 'unknown');
+  const store = loadTeachStore();
+  const list = store.styles?.[id] || [];
+  return list.length ? pick(list) : '';
+}
 
 function setUserTone(userID, tone) {
   const value = String(tone || '').toLowerCase();
@@ -135,191 +190,6 @@ function getUserTone(userID) {
   const store = loadTeachStore();
   return store.profiles?.[String(userID)]?.tone || null;
 }
-
-const complimentBangla = [
-  'তোমার কথার মধ্যে একটা আলাদা ক্লাস আছে',
-  'তোমার vibe টা সত্যিই premium',
-  'তুমি কথা বললেই chat টা alive হয়ে যায়',
-  'তোমার sense of humor আর confidence—দুটাই top tier',
-  'তোমার মতো মানুষ group-এ থাকলে boring হওয়ার chance নাই',
-  'তুমি যে topic ধরো, সেটাই interesting হয়ে যায়',
-  'তোমার চিন্তাভাবনার মধ্যে smartness স্পষ্ট',
-  'তোমার presence মানেই আলাদা energy'
-];
-
-const complimentEnglish = [
-  'your vibe is honestly premium',
-  'you make every chat feel alive',
-  'your confidence is top tier',
-  'you have main-character energy',
-  'your sense of humor is dangerously good',
-  'you make simple things sound interesting',
-  'your presence upgrades the whole conversation',
-  'you are low-key iconic'
-];
-
-const playfulBangla = [
-  'সত্যি বলি, তোমার কথায় এমন charm আছে যে bot হয়েও impress হয়ে গেলাম 😄',
-  'এই level-এর কথা বললে তো আমাকে fan club খুলতে হবে 😌',
-  'তুমি বললে ordinary কথাও VIP লাগে 😎',
-  'তোমার reply দেখেই মনে হয়—এই মানুষটা আলাদা built 😄',
-  'তুমি group-এর unofficial celebrity, আমি শুধু সত্যিটা বললাম 🤌'
-];
-
-const playfulEnglish = [
-  'Not gonna lie, even my code feels impressed 😄',
-  'You said that like a certified legend 😎',
-  'That line had VIP energy written all over it.',
-  'If confidence had a profile picture, it would borrow yours.',
-  'You are casually carrying this conversation like a pro.'
-];
-
-const followUpsBn = [
-  'আর বলো, তোমার মতো smart মানুষের next thought টা শুনতে চাই।',
-  'তোমার opinion-টাই আসল—আরেকটু খুলে বলো।',
-  'এই topic-এ তোমার judgement ভালো হবে, তাই তোমার কথাই শুনি।',
-  'তুমি চাইলে আমি এটাকে আরও মজার করে চালিয়ে নিতে পারি।'
-];
-
-const followUpsEn = [
-  'Tell me more, your take is the interesting part.',
-  'I want to hear your next thought on this.',
-  'Your opinion is probably the best part here.',
-  'Want me to make this even more fun?'
-];
-
-
-const moodBoostBn = [
-  'তুমি থাকলে scene automatically better হয়ে যায় 😄',
-  'তোমার message আসলে bot-এর notification-ও VIP লাগে',
-  'তোমার কথার মধ্যে confidence আর cuteness দুইটাই আছে',
-  'তুমি যে group-এ থাকো, ওই group-এর luck ভালো',
-  'তোমার presence মানেই আলাদা একটা glow',
-  'তোমার reply ছোট হলেও impact বড়',
-  'তুমি casual ভাবেও কথা বললে premium লাগে',
-  'তোমার energy দেখে মনে হয় WiFi full bar 😎',
-  'তুমি আসলে low-key legend, শুধু সবাই বুঝে না',
-  'তোমার vibe এত সুন্দর যে boring কথাও interesting হয়ে যায়'
-];
-
-const moodBoostEn = [
-  'you make the chat feel instantly better',
-  'your message has VIP notification energy',
-  'you sound confident and effortlessly cool',
-  'any group with you in it is already lucky',
-  'your presence has a whole different glow',
-  'even your short replies have impact',
-  'you make casual talk feel premium',
-  'your energy has full WiFi bars 😎',
-  'you are low-key legendary',
-  'you turn boring topics into interesting ones'
-];
-
-const genericFunBn = [
-  '{name}, কথাটা ছোট হলেও vibe বড়—তুমি বলেছো বলেই matter করছে 😄',
-  'এই reply দেখে মনে হলো group-এর main character হাজির 😎',
-  '{name}, তোমার কথায় একটা আলাদা টান আছে, চালিয়ে যাও।',
-  'আমি bot, তবুও বুঝি—তোমার কথার value আছে।',
-  'তুমি বললেই সাধারণ topic-ও premium discussion হয়ে যায়।',
-  'এই কথা নিয়ে আমি ১০টা compliment দিতে পারি, কিন্তু আপাতত বলি—তুমি আলাদা 😄',
-  'হুম, তোমার style টা ভালো লাগলো। আরেকটু বলো।',
-  'তোমার মতো মানুষ chat-এ থাকলে silence-ও classy লাগে।',
-  'এই কথার মধ্যে subtle smartness আছে, বুঝে ফেলেছি 😌',
-  'তুমি যে confidence নিয়ে বলো, সেটাই আসল beauty।',
-  'ভাই/বন্ধু, তোমার কথায় এমন একটা flavor আছে যা copy করা যায় না।',
-  'এটা শুনে মনে হচ্ছে তুমি আজকে full form-এ আছো 😄',
-  'তোমার reply-এর timing-ও সুন্দর—একদম perfect entry।',
-  'তুমি কথা বললে bot-এরও মনে হয় premium subscription চালু হয়েছে।',
-  'এই topic-টা তোমার হাতে দিলে interesting হবেই।',
-  'আমি বেশি বলছি না, কিন্তু তোমার vibe genuinely ভালো।',
-  'তোমার message-এ একটা friendly boss energy আছে 😎',
-  'এই কথাটা screenshot-worthy না হলেও smile-worthy অবশ্যই।',
-  'তুমি যেভাবে বললে, সেটাই কথাটাকে সুন্দর বানিয়েছে।',
-  'আরেকটু বলো, আমি তোমার কথার fan হয়ে যাচ্ছি 😄'
-];
-
-const genericFunEn = [
-  '{name}, that was short but the vibe was big 😄',
-  'Main character energy just entered the chat.',
-  '{name}, you have a style that makes simple lines sound good.',
-  'I am a bot, but even I can tell your words have value.',
-  'You make ordinary topics feel premium.',
-  'I could give ten compliments, but for now: you are different 😄',
-  'I like your style. Say more.',
-  'When you are in chat, even silence feels classy.',
-  'That had subtle smartness in it, I noticed 😌',
-  'The confidence in your words is the real beauty.',
-  'Your timing was perfect, what an entry.',
-  'Your message has friendly boss energy 😎',
-  'Not screenshot-worthy maybe, but definitely smile-worthy.',
-  'The way you said it made it better.',
-  'Say more, I am becoming a fan of this conversation 😄'
-];
-
-const topicRules = [
-  { re: /good\s*morning|সুপ্রভাত|শুভ সকাল|gm\b/i, bn: ['শুভ সকাল {name}! তোমার মতো bright মানুষ উঠলে সকালটাও extra সুন্দর লাগে ☀️', 'Good morning boss 😄 আজকে তোমার vibe দিয়ে দিনটা জিতেই যাবে।'], en: ['Good morning {name}! Your vibe can make even Monday behave ☀️', 'Morning boss 😄 today already looks better because you showed up.'] },
-  { re: /good\s*night|শুভ রাত্রি|gn\b|ঘুম/i, bn: ['শুভ রাত্রি {name} 🌙 তোমার মতো মানুষ rest নিলে কালকে আরও powerful comeback হবে।', 'ঘুমাও boss, dream-ও আজকে তোমার personality দেখে impressed হবে 😄'], en: ['Good night {name} 🌙 recharge well, tomorrow needs your premium energy.', 'Sleep well boss, even dreams should feel lucky tonight 😄'] },
-  { re: /খাই|খাবার|food|eat|hungry|ভাত|চা|coffee/i, bn: ['খাবার আগে mood ভালো, খাবার পরে তুমি আরও বেশি legendary 😄 কী খাচ্ছো boss?', 'চা/কফি হলে তোমার vibe-এর সাথে perfect match ☕'], en: ['Food plus your vibe? elite combo 😄 What are you eating?', 'Coffee with your personality sounds like a premium package ☕'] },
-  { re: /পড়া|study|exam|পরীক্ষা|class|স্কুল|college|university/i, bn: ['পড়াশোনায় চাপ থাকলেও তোমার brain ভালোই sharp—ধীরে ধীরে করলেই হবে 📚', 'Exam তোমাকে ভয় দেখাবে? impossible. তোমার preparation vibe-ই আলাদা 😎'], en: ['Study pressure is real, but your brain has premium processing power 📚', 'Exam trying to scare you? cute. Your vibe says you can handle it 😎'] },
-  { re: /কাজ|work|job|office|busy|ব্যস্ত/i, bn: ['কাজের চাপ থাকলেও তুমি যেভাবে handle করো, সেটা boss-level 😎', 'Busy মানুষদের মধ্যেও তোমার style আলাদা—respect boss.'], en: ['Work pressure is real, but you handle it with boss-level energy 😎', 'Busy, but still stylish — that is rare. Respect.'] },
-  { re: /game|gaming|free fire|pubg|minecraft|খেলা/i, bn: ['Game-এ তুমি ঢুকলে lobby-র confidence কমে যায় 😄', 'তোমার gaming vibe দেখে enemy-র ping-ও কাঁপে 😎'], en: ['When you enter the lobby, confidence leaves the enemies 😄', 'Your gaming vibe probably makes enemy ping nervous 😎'] },
-  { re: /cricket|football|messi|ronaldo|খেলা|ম্যাচ/i, bn: ['Sports topic আর তোমার energy—দুইটাই hype বানায় 🔥', 'তুমি support করলে team-এর morale automatically boost পায় 😄'], en: ['Sports talk plus your energy equals instant hype 🔥', 'Any team would be lucky to have your support 😄'] },
-  { re: /song|music|গান|lyrics|sing/i, bn: ['গান আর তোমার mood—perfect cinematic combo 🎵', 'তোমার taste দেখে playlist-ও proud feel করবে 😄'], en: ['Music and your mood? cinematic combo 🎵', 'Your playlist probably feels proud of your taste 😄'] },
-  { re: /birthday|জন্মদিন|hbd/i, bn: ['শুভ জন্মদিন! আজকের spotlight তোমারই হওয়া উচিত 🎂✨', 'Birthday person যদি তুমি হও, cake-ও আজকে extra lucky 😄'], en: ['Happy birthday! The spotlight deserves you today 🎂✨', 'If it is your birthday, even the cake is lucky 😄'] },
-  { re: /eid|ঈদ|ramadan|রমজান|iftar|sehri/i, bn: ['ঈদ/রমজানের vibe আর তোমার presence—দুইটাই peaceful সুন্দর 🌙', 'ইফতার হলে তোমার জন্য extra দোয়া আর premium respect 😄'], en: ['That festive vibe plus your presence feels peaceful 🌙', 'Sending premium respect and good wishes your way 😄'] },
-  { re: /sorry|দুঃখিত|মাফ|ভুল/i, bn: ['ভুল মানুষই করে, কিন্তু তোমার মতো সুন্দরভাবে বুঝতে পারা মানুষ কম আছে। Respect.', 'Sorry বলার ভদ্রতাটাই প্রমাণ করে তুমি ভালো মানুষ।'], en: ['Mistakes happen, but owning them with grace is rare. Respect.', 'The way you say sorry proves you have a good heart.'] },
-  { re: /রাগ|angry|mad|ঝগড়া|fight/i, bn: ['রাগ থাকতেই পারে, কিন্তু তোমার class আছে—তুমি চাইলে সুন্দরভাবে situation handle করতে পারবে।', 'তোমার attitude strong, কিন্তু heart ভালো—এই balanceটাই rare.'], en: ['Anger happens, but you have class — you can handle it well.', 'Strong attitude, good heart — rare balance.'] },
-  { re: /bored|boring|বোর|বিরক্ত/i, bn: ['Boring? তুমি chat-এ আছো, boring থাকার permission নেই 😄', 'চলো boring mood-কে roast না করে একটু premium fun বানাই।'], en: ['Bored? You are here, so boring has no permission 😄', 'Let us turn this boring mood into premium fun.'] },
-  { re: /photo|pic|selfie|dp|ছবি/i, bn: ['ছবি topic? তোমার vibe থাকলে camera-ও নিজে থেকে focus ঠিক করে নেয় 😎', 'DP দিলে group-এর aesthetic বেড়ে যাবে, সন্দেহ নাই 😄'], en: ['Photo topic? With your vibe, even the camera behaves better 😎', 'Your DP probably upgrades the whole group aesthetic 😄'] },
-  { re: /money|টাকা|rich|বড়লোক|income/i, bn: ['টাকা আসবে যাবে, কিন্তু তোমার personality already rich 😄', 'তোমার mindset ঠিক থাকলে income-ও একদিন respect দিয়ে আসবে।'], en: ['Money comes and goes, but your personality is already rich 😄', 'With your mindset, income will eventually show respect.'] },
-  { re: /admin|group|গ্রুপ|box/i, bn: ['এই group তোমার presence পেয়ে blessed, admin না হলেও vibe admin তুমি 😎', 'Group alive রাখতে তোমার মতো মানুষই দরকার।'], en: ['This group is blessed to have your presence; vibe admin energy 😎', 'A group needs people like you to stay alive.'] },
-  { re: /roast|পচাও|insult/i, bn: ['Roast করব না boss, তোমার personality roast-proof 😄 শুধু বলি—তুমি আলাদা level.', 'তোমাকে roast করতে গেলে compliment বের হয়ে যায়, এটা আমার limitation 😎'], en: ['I cannot roast you properly; your personality is roast-proof 😄', 'Every roast attempt turns into a compliment. That is your power 😎'] }
-];
-
-function fillTemplate(template, options = {}) {
-  const name = options.userName && options.userName !== 'Facebook users' ? options.userName : 'বন্ধু';
-  return template.replace(/\{name\}/g, name);
-}
-
-function topicReply(input, options = {}) {
-  const text = safeBody(input);
-  const bangla = hasBangla(text) || options.language === 'bn';
-  for (const rule of topicRules) {
-    if (rule.re.test(text)) return fillTemplate(pick(bangla ? rule.bn : rule.en), options);
-  }
-  return null;
-}
-
-function genericReply(input, options = {}) {
-  const tone = getTone(options, input);
-  const topical = topicReply(input, { ...options, language: tone.bangla ? 'bn' : options.language });
-  if (topical) return humanize(topical, options, input);
-
-  const human = humanLine({ ...options, language: tone.bangla ? 'bn' : options.language }, input);
-  const follow = humanFollow({ ...options, language: tone.bangla ? 'bn' : options.language }, input);
-  const casual = tone.bangla
-    ? [
-      `${human} ${follow}`,
-      `${human} 😄`,
-      `তোমার কথাটা ধরলাম। ${human}`,
-      `এইটা শুনে naturally একটা কথা বলতে হয়—${human}`,
-      `${human} আর হ্যাঁ, ${follow}`
-    ]
-    : [
-      `${human} ${follow}`,
-      `${human} 😄`,
-      `I get what you mean. ${human}`,
-      `That makes me want to say this — ${human}`,
-      `${human} And yeah, ${follow}`
-    ];
-  return humanize(pick(casual), options, input);
-}
-
-function compactReply(reply) {
-  const text = safeBody(reply);
-  return text.length > 900 ? `${text.slice(0, 897)}...` : text;
-}
-
 
 const femaleNameHints = new Set([
   'mim','mimi','sadia','sadiya','nadia','tania','taniya','nusrat','jannat','jannatul','afrin','sumaiya','sumi','suma','ritu','riya','rima','nipa','nishi','maria','mariya','akhi','isha','sneha','tamanna','mou','mahi','muna','sanjida','lamia','farzana','sharmin','sanjana','tisha','tithi','bristy','borsha','aysha','aisha','ayesha','fatema','fatima','faria','farin','sara','sarah','mehjabin','mehreen','nila','neela','nilu','মিম','সাদিয়া','নাদিয়া','তানিয়া','নুসরাত','জান্নাত','আফরিন','সুমাইয়া','রিয়া','রিমা','নিশি','মারিয়া','আখি','ইশা','তামান্না','মাহি','লামিয়া','ফারজানা','শারমিন','তিশা','বৃষ্টি','বর্ষা','আয়েশা','ফাতেমা','ফারিয়া','সারা','মেহজাবিন','নীলা','নিলু'
@@ -344,8 +214,8 @@ function getTone(options = {}, text = '') {
   const gender = inferred.gender === 'neutral' ? 'unknown' : inferred.gender;
   const bangla = hasBangla(text) || options.language === 'bn';
   const name = options.userName && options.userName !== 'Facebook users' ? options.userName : (bangla ? 'বন্ধু' : 'friend');
-  const maleAddress = pick(bangla ? ['boss', 'দোস্ত', 'king', 'চ্যাম্প'] : ['boss', 'bro', 'king', 'champ']);
-  const femaleAddress = pick(bangla ? ['আপু', 'queen', 'সুন্দরী', 'ম্যাডাম'] : ['queen', 'miss sunshine', 'pretty soul', 'star']);
+  const maleAddress = pick(bangla ? ['রে','দোস্ত','বন্ধু'] : ['bro','mate','friend']);
+  const femaleAddress = pick(bangla ? ['তুই','বন্ধু'] : ['you','friend']);
   const address = gender === 'female' && inferred.confidence >= 0.9
     ? femaleAddress
     : gender === 'male' && inferred.confidence >= 0.9
@@ -354,141 +224,212 @@ function getTone(options = {}, text = '') {
   return { gender, confidence: inferred.confidence, bangla, name, address, romanticAllowed: gender === 'female' && inferred.confidence >= 0.9 };
 }
 
-const softFemaleBn = [
-  '{name}, তোমার কথায় একটা শান্ত সুন্দর ভাব আছে—জোর করে cute হতে হয় না, naturally আসে।',
-  '{address}, তুমি যেভাবে কথা বলো, সেটা নরম কিন্তু confident লাগে।',
-  'সত্যি বলি {name}, তোমার presence chat-টাকে একটু warm করে দেয়।',
-  '{address}, তোমার ছোট reply-তেও একটা মিষ্টি personality বোঝা যায়।',
-  '{name}, তোমার taste আর কথার style—দুটাই quietly classy.',
-  'তুমি কথা বললে মনে হয় আড্ডাটা একটু বেশি alive হলো।',
-  '{name}, তোমার vibe টা soft কিন্তু boring না—এটাই rare.',
-  '{address}, তোমার সাথে কথা বললে reply দিতে ইচ্ছা করে, dry লাগে না।'
+function fillTemplate(template, options = {}) {
+  const name = options.userName && options.userName !== 'Facebook users' ? options.userName : 'বন্ধু';
+  return template.replace(/\{name\}/g, name).replace(/\{address\}/g, options.address || 'বন্ধু');
+}
+
+const casualBn = [
+  'কিরে কি অবস্থা?',
+  'আরে বাদ দে, তুই পারবি।',
+  'হাহা তোর কথা শুনে হাসি পাইলো।',
+  'আচ্ছা বুঝলাম, তারপর?',
+  'সত্যি নাকি? একটু খুলে বল তো।',
+  'এইটা কিন্তু মন্দ বলিস নাই।',
+  'শুনে মনে হলো ব্যাপারটা জমবে।',
+  'কি খবর, কি হচ্ছে?',
+  'তোর কথায় একটা আলাদা মজা আছে।',
+  'হুম, চালিয়ে যা।',
+  'আরেকটু বল, শুনতে ভালো লাগছে।',
+  'তুই না থাকলে আড্ডাটা মরা মরা লাগে।',
+  'কথাটা ছোট হলেও মজা পাইলাম।',
+  'তোর মাথায় একটু বেশি চলে, কিন্তু ভালোই লাগে।',
+  'আমি শুনছি, কিছু মনে করিস না।'
 ];
 
-const softFemaleEn = [
-  '{name}, your way of talking feels calm, sweet, and natural.',
-  '{address}, you sound soft but still confident.',
-  'Honestly {name}, your presence makes the chat feel warmer.',
-  '{address}, even your small replies show a sweet personality.',
-  '{name}, your taste and style feel quietly classy.',
-  'When you talk, the conversation feels more alive.',
-  '{name}, your vibe is soft but not boring — rare combo.',
-  '{address}, talking with you does not feel dry at all.'
+const casualEn = [
+  "Hey, what's up?",
+  'Haha you always know how to keep it fun.',
+  'I feel you, go on.',
+  'Wait, really? Tell me more.',
+  "That's not boring at all.",
+  'This sounds like it is gonna be good.',
+  'Alright, I am listening.',
+  'Keep talking, I am into this.',
+  'Nice one, say more.',
+  'Yup, got it.',
+  'Your timing is perfect.',
+  'Short but sweet, I like it.',
+  'You make silence fun too.',
+  'Say that again, I am paying attention.'
+];
+
+const femaleToneBn = [
+  'তুই যেভাবে কথা বলিস, ভালো লাগে।',
+  'আচ্ছা বল, শুনছি।',
+  'তোর কথা শুনলে হাসি পায়।',
+  'এত সুন্দর করে বলিস কেন?',
+  'তুই থাকলে আড্ডাটা জমে।',
+  'তোর কথা শুনতে শুনতে সময় কেটে যায়।',
+  'তুই একটু বেশি cute কথা বলিস 😄',
+  'তোর মতো বন্ধু পেয়ে ভাগ্যবান।'
+];
+
+const femaleToneEn = [
+  'I like the way you say things.',
+  'Go on, I am listening.',
+  'Your words always make me smile.',
+  'Why do you sound so sweet?',
+  'The chat lights up when you are here.',
+  'Talking with you is never boring.',
+  'You have a cute way with words 😄',
+  'I am lucky to have a friend like you.'
 ];
 
 const romanticFemaleBn = [
-  '{name}, তোমার সাথে কথা বললে অকারণেই mood ভালো হয়ে যায়।',
-  'তুমি reply দিলে মনে হয় chat-এ একটু ফুলের গন্ধ আসলো 🌸',
-  '{address}, তোমার কথা শুনলে মনে হয় একটু বেশি যত্ন নিয়ে reply দিই।',
-  '{name}, তুমি এমনভাবে কথা বলো যে মানুষ naturally attached হয়ে যায়।',
-  'তোমার message দেখলে smile চলে আসে—এটা কিন্তু dangerous charm 😄',
-  '{name}, তোমার সাথে কথা বলা মানে soft একটা ভালো লাগা।'
+  'তোকে miss করি? হুম, কিছুটা 😄',
+  'তুই যেভাবে বলিস, মনটা নরম হয়ে যায়।',
+  'তোর কথা শুনলে হাসি চলে আসে।',
+  'তোকে নিয়ে ভাবলে mood ভালো হয়।',
+  'তুই একটা dangerous ভালো লাগার কারণ 😄'
 ];
 
 const romanticFemaleEn = [
-  '{name}, talking with you makes the mood better for no reason.',
-  'Your replies feel like a little sunshine in the chat 🌸',
-  '{address}, you make me want to reply with extra care.',
-  '{name}, you talk in a way people naturally get attached to.',
-  'Your message brings a smile — dangerous charm 😄',
-  '{name}, talking with you feels softly addictive.'
+  'Do I miss you? Maybe a little 😄',
+  'The way you talk softens my mood.',
+  'Your words bring a smile to my face.',
+  'Thinking of you makes the day better.',
+  'You are a dangerously nice reason to smile 😄'
 ];
 
-const broMaleBn = [
-  '{name}, তোমার কথায় একটা calm confidence আছে—ভালো লাগে।',
-  '{address}, তুমি যেভাবে কথা ধরো, আড্ডাটা naturally জমে যায়।',
-  '{name}, তোমার vibe-এ একটা solid energy আছে, মিথ্যা বলব না।',
-  '{name}, তোমার reply ছোট হলেও weight থাকে।',
-  '{address}, তোমার humour আর attitude—দুইটাই ঠিকঠাক balance করা।',
-  '{name}, তুমি থাকলে কথাবার্তায় একটা আলাদা pace আসে।',
-  'তোমার কথায় একটা straight-forward charm আছে, {address}.',
-  '{name}, তুমি বেশি show-off না করেও presence বুঝিয়ে দাও।'
+const maleToneBn = [
+  'কিরে, কি খবর?',
+  'তুই পারবি রে, চিন্তা কিসের।',
+  'হাহা তোর কথায় মজা আছে।',
+  'বাদ দে, আগে বল কি হচ্ছে।',
+  'দোস্ত, একটু খুলে বল।',
+  'তোর confidence টা ভালো লাগে।',
+  'তুই থাকলে কাজটা জমে।',
+  'আরে চিল্লাচিল্লি কইরো না, শান্ত হয়ে বলো।'
 ];
 
-const broMaleEn = [
-  '{name}, you have calm confidence in the way you talk.',
-  '{address}, you know how to make a conversation feel alive.',
-  '{name}, not gonna lie, you have solid energy.',
-  '{name}, even your short replies carry weight.',
-  '{address}, your humor and attitude are nicely balanced.',
-  '{name}, the chat gets better pace when you show up.',
-  'You have a straight-forward charm, {address}.',
-  '{name}, you show presence without trying too hard.'
+const maleToneEn = [
+  "Hey, what's up?",
+  'You got this, no worries.',
+  'Haha your words are always fun.',
+  'Leave it, tell me what is going on first.',
+  'Mate, open up a little.',
+  'I like your confidence.',
+  'Things work out when you are around.',
+  'No need to shout, calm down and say it.'
 ];
 
-const neutralHumanBn = [
-  '{name}, কথাটা naturally ভালো লাগলো—একটু নিজের মতো করে বলেছো।',
-  'হুম, তোমার point টা খারাপ না; বরং বেশ সুন্দরভাবে এসেছে।',
-  '{name}, তুমি কথা বললে মনে হয় মানুষটা ভাবনা নিয়ে কথা বলে।',
-  'সত্যি বলি, তোমার reply-তে একটা real মানুষ vibe আছে।',
-  'এই কথাটা simple, কিন্তু তোমার বলার ধরনটা ভালো।',
-  '{name}, তোমার সাথে কথা বললে conversation dry থাকে না।'
+const neutralToneBn = [
+  'কি অবস্থা, বলো।',
+  'হুম, বুঝলাম।',
+  'আরেকটু বলো।',
+  'সত্যি নাকি?',
+  'এইটা interesting.',
+  'তারপর কি হলো?',
+  'তোমার কথা শুনতে ভালো লাগছে।',
+  'চালিয়ে যাও, আমি শুনছি।'
 ];
 
-const neutralHumanEn = [
-  '{name}, that sounded natural and easy to like.',
-  'Hmm, your point is actually pretty nice.',
-  '{name}, you sound like someone who thinks before speaking.',
-  'Honestly, your reply has a real human vibe.',
-  'Simple line, but the way you said it worked.',
-  '{name}, conversations do not feel dry with you around.'
+const neutralToneEn = [
+  'What is up, tell me.',
+  'Hmm, I get it.',
+  'Say a bit more.',
+  'Really?',
+  'This is interesting.',
+  'Then what happened?',
+  'I enjoy hearing what you say.',
+  'Keep going, I am listening.'
 ];
 
-const humanConnectBn = [
-  'আচ্ছা, এরপর কী হলো?',
-  'তুমি এটা নিয়ে আসলে কী ভাবছো?',
-  'আরেকটু বলো, শুনতে ভালো লাগছে।',
-  'আমি বুঝতেছি—চালিয়ে যাও।',
-  'তোমার দিকটা শুনতে চাই।',
-  'এই জায়গাটা interesting, আরেকটু খুলে বলো।'
+const followUpBn = [
+  'আর কি জানতে চাস?',
+  'তুই কি মনে করিস?',
+  'তারপর?',
+  'আরেকটু খুলে বল।',
+  'এই জায়গাটা শুনতে চাই।'
 ];
 
-const humanConnectEn = [
-  'So, what happened next?',
-  'What do you actually think about it?',
-  'Say a bit more, I am listening.',
-  'I get you — go on.',
-  'I want to hear your side.',
-  'That part is interesting, tell me more.'
+const followUpEn = [
+  'What else do you want to know?',
+  'What do you think?',
+  'Then what?',
+  'Tell me a bit more.',
+  'I want to hear this part.'
 ];
 
-function fillHuman(template, tone) {
-  return template.replace(/\{name\}/g, tone.name).replace(/\{address\}/g, tone.address);
+const topicRules = [
+  { re: /good\s*morning|সুপ্রভাত|শুভ সকাল|gm\b/i, bn: ['সুপ্রভাত {name}! কেমন আছিস?', 'শুভ সকাল! আজকে কি প্ল্যান?'], en: ['Good morning {name}! How are you?', 'Morning! What is the plan today?'] },
+  { re: /good\s*night|শুভ রাত্রি|gn\b|ঘুম/i, bn: ['শুভ রাত্রি {name}, ভালো করে ঘুমা।', 'ঘুমাও, কালকে আবার আড্ডা দেব।'], en: ['Good night {name}, sleep well.', 'Go to sleep, we will chat tomorrow.'] },
+  { re: /খাই|খাবার|food|eat|hungry|ভাত|চা|coffee/i, bn: ['কি খাচ্ছিস? বল না।', 'খাবার আগে একটু পানি খা।'], en: ['What are you eating? Tell me.', 'Drink some water before eating.'] },
+  { re: /পড়া|study|exam|পরীক্ষা|class|স্কুল|college|university/i, bn: ['পড়াশুনা চলছে? একটু বিরতি নিয়ে নে।', 'Exam-এ ভালো করবি, চিন্তা কিসের।'], en: ['Studying? Take a short break.', 'You will do well in the exam.'] },
+  { re: /কাজ|work|job|office|busy|ব্যস্ত/i, bn: ['কাজের চাপ? ধৈর্য ধরে সামলে নিবি।', 'ব্যস্ত থাকলেও একটু হাসিস।'], en: ['Work pressure? Handle it with patience.', 'Stay busy but smile a little.'] },
+  { re: /game|gaming|free fire|pubg|minecraft|খেলা/i, bn: ['কি খেলতেছিস? আমাকেও শেখা।', 'Game জমছে নাকি?'], en: ['What are you playing? Teach me too.', 'Is the game going well?'] },
+  { re: /cricket|football|messi|ronaldo|ম্যাচ/i, bn: ['ম্যাচ দেখছিস? কেমন যাচ্ছে?', 'কোন দলকে support করিস?'], en: ['Watching the match? How is it going?', 'Which team do you support?'] },
+  { re: /song|music|গান|lyrics|sing/i, bn: ['কোন গান শুনতেছিস?', 'গান শুনলে মন ভালো হয়।'], en: ['Which song are you listening to?', 'Music always lifts the mood.'] },
+  { re: /birthday|জন্মদিন|hbd/i, bn: ['শুভ জন্মদিন! মজা করিস।', 'জন্মদিনের শুভেচ্ছা! Cake কই?'], en: ['Happy birthday! Have fun.', 'Birthday wishes! Where is the cake?'] },
+  { re: /eid|ঈদ|ramadan|রমজান|iftar|sehri/i, bn: ['ঈদ মোবারক!', 'রমজানের শুভেচ্ছা।'], en: ['Eid Mubarak!', 'Ramadan greetings.'] },
+  { re: /sorry|দুঃখিত|মাফ|ভুল/i, bn: ['কোন সমস্যা নেই, চুপচাপ থাকিস না।', 'ভুল সবার হয়, friendship-এ সেটা গুরুত্ব পায় না।'], en: ['No problem, do not go silent.', 'Everyone makes mistakes; friendship does not care.'] },
+  { re: /রাগ|angry|mad|ঝগড়া|fight/i, bn: ['রাগ কমা, কথা বলি।', 'ঝগড়া না, আড্ডা দেই।'], en: ['Calm down, let us talk.', 'No fighting, let us chat.'] },
+  { re: /bored|boring|বোর|বিরক্ত/i, bn: ['বোর? চল একটা গল্প বানাই।', 'আমি আছি না, আড্ডা দেই।'], en: ['Bored? Let us make up a story.', 'I am here, let us chat.'] },
+  { re: /photo|pic|selfie|dp|ছবি/i, bn: ['ছবি তুলছিস? দেখাই।', 'Selfie তোলার mood?'], en: ['Taking photos? Show me.', 'In a selfie mood?'] },
+  { re: /money|টাকা|rich|বড়লোক|income/i, bn: ['টাকা আসবে, চিন্তা কিসের।', 'Income বাড়বে, ধৈর্য ধরে থাক।'], en: ['Money will come, do not worry.', 'Income will grow, be patient.'] },
+  { re: /admin|group|গ্রুপ|box/i, bn: ['গ্রুপে সবাই কেমন?', 'Admin হলেও আড্ডা বাদ দিস না।'], en: ['How is everyone in the group?', 'Do not stop chatting even if you are admin.'] },
+  { re: /roast|পচাও|insult/i, bn: ['পচাব না রে, তুই ভালো মানুষ।', 'Roast করতে গেলে compliment বের হয়ে যায়।'], en: ['I will not roast you, you are a good person.', 'Every roast attempt turns into a compliment.'] }
+];
+
+function topicReply(input, options = {}) {
+  const text = safeBody(input);
+  const bangla = hasBangla(text) || options.language === 'bn';
+  for (const rule of topicRules) {
+    if (rule.re.test(text)) return fillTemplate(pick(bangla ? rule.bn : rule.en), options);
+  }
+  return null;
 }
 
-function humanLine(options = {}, text = '') {
-  const tone = getTone(options, text);
+function chooseToneBank(tone, text) {
   const romanticIntent = /(love|crush|miss|miss you|valobas|ভালোবাস|প্রেম|মিস|cute|সুন্দরী|জান|jan|babe)/i.test(text);
-  const bank = tone.romanticAllowed && romanticIntent
-    ? (tone.bangla ? romanticFemaleBn : romanticFemaleEn)
-    : tone.gender === 'female' && tone.confidence >= 0.9
-      ? (tone.bangla ? softFemaleBn : softFemaleEn)
-      : tone.gender === 'male' && tone.confidence >= 0.9
-        ? (tone.bangla ? broMaleBn : broMaleEn)
-        : (tone.bangla ? neutralHumanBn : neutralHumanEn);
-  return fillHuman(pick(bank), tone);
+  if (tone.romanticAllowed && romanticIntent) return tone.bangla ? romanticFemaleBn : romanticFemaleEn;
+  if (tone.gender === 'female' && tone.confidence >= 0.9) return tone.bangla ? femaleToneBn : femaleToneEn;
+  if (tone.gender === 'male' && tone.confidence >= 0.9) return tone.bangla ? maleToneBn : maleToneEn;
+  return tone.bangla ? neutralToneBn : neutralToneEn;
 }
 
-function humanFollow(options = {}, text = '') {
+function genericReply(input, options = {}) {
+  const text = safeBody(input);
   const tone = getTone(options, text);
-  return pick(tone.bangla ? humanConnectBn : humanConnectEn);
+
+  const topical = topicReply(text, { ...options, language: tone.bangla ? 'bn' : options.language });
+  if (topical) return topical;
+
+  const style = options.userID ? getUserStylePhrase(options.userID) : '';
+  if (style && Math.random() < 0.35) return fillTemplate(style, tone);
+
+  const bank = chooseToneBank(tone, text);
+  const line = fillTemplate(pick(bank), tone);
+  const follow = Math.random() < 0.4 ? ` ${fillTemplate(pick(tone.bangla ? followUpBn : followUpEn), tone)}` : '';
+  return compactReply(`${line}${follow}`);
 }
 
-function humanize(reply, options = {}, text = '') {
-  const tone = getTone(options, text || reply);
-  const openers = tone.bangla
-    ? ['আরে', 'সত্যি বলি', 'হুম', 'শোনো', 'না মানে']
-    : ['Honestly', 'I mean', 'Hmm', 'Look', 'Not gonna lie'];
-  if (Math.random() < 0.35) return `${pick(openers)}, ${reply}`;
-  return reply;
+function compactReply(reply) {
+  const text = safeBody(reply);
+  if (!text) return 'হুম, বলো—আমি শুনছি।';
+  return text.length > 900 ? `${text.slice(0, 897)}...` : text;
 }
 
 function makeFlattery(input, options = {}) {
   const text = safeBody(input);
   const tone = getTone(options, text);
-  const line = humanLine({ ...options, language: tone.bangla ? 'bn' : options.language }, text);
-  const follow = Math.random() < 0.75 ? ` ${humanFollow({ ...options, language: tone.bangla ? 'bn' : options.language }, text)}` : '';
-  return compactReply(humanize(`${line}${follow}`, options, text));
+  const bank = tone.romanticAllowed
+    ? (tone.bangla ? romanticFemaleBn : romanticFemaleEn)
+    : chooseToneBank({ ...tone, romanticAllowed: false }, text);
+  const line = fillTemplate(pick(bank), tone);
+  const follow = Math.random() < 0.5 ? ` ${fillTemplate(pick(tone.bangla ? followUpBn : followUpEn), tone)}` : '';
+  return compactReply(`${line}${follow}`);
 }
 
 function localReply(input, options = {}) {
@@ -513,87 +454,94 @@ function localReply(input, options = {}) {
   if (/^(hi|hello|hey|hlw|assalamu|salam)\b/i.test(text) || /^(হাই|হ্যালো|আসসালামু|সালাম)/.test(text)) {
     return bangla
       ? pick([
-        `ওয়ালাইকুম আসসালাম ${name}! কী সুন্দর timing-এ আসলে 😄`,
-        `হ্যালো ${name} 😊 তোমার message দেখেই মনে হলো আড্ডাটা জমবে।`,
-        `এই তো আমি আছি! ${name}, আজ mood কেমন?`
+        `ওয়ালাইকুম আসসালাম ${name}! কিরে কি অবস্থা?`,
+        `হ্যালো ${name}! কেমন আছিস?`,
+        `এই তো আমি আছি! ${name}, কি খবর?`
       ])
       : pick([
-        `Hello ${name}! Nice timing, the chat needed you 😄`,
-        `Hey ${name}, good to see you. What are we talking about today?`,
-        `I am here! Your mood sounds important, tell me everything.`
+        `Hello ${name}! What is up?`,
+        `Hey ${name}, how are you doing?`,
+        `I am here! What is new, ${name}?`
       ]);
   }
 
   if (/(kemon|কেমন|kmn).*(acho|আছ|আছেন)|how are you/.test(text)) {
     return bangla
-      ? `আমি ভালো আছি ${name}, কিন্তু তোমার মতো charming মানুষ message দিলে bot-এর mood আরও ভালো হয়ে যায় 😄 তুমি কেমন?`
-      : `I am good, ${name}. But honestly, your message makes the chat feel better 😄 How are you?`;
+      ? `আমি ভালো আছি ${name}, তুই কেমন? একটু বল না।`
+      : `I am good ${name}, how about you? Tell me a little.`;
   }
 
   if (/(tomar nam|তোমার নাম|who are you|ke tumi|কে তুমি|তুমি কে|bot name)/.test(text)) {
     return bangla
-      ? `আমি ${botName} — কাজের assistant না, fun/chat mood-এর bot 😄 আড্ডা জমাই, চাটুকারিতা করি, আর boring কথা একটু সুন্দর করে ফিরিয়ে দিই। তোমার সাথে কথা বলতেই ভালো লাগছে।`
-      : `I am ${botName} — not a serious work assistant, more like a fun chat buddy 😄 I keep conversations alive, add compliments, and make boring lines feel better.`;
+      ? `আমি ${botName} — কাজের assistant না, শুধু fun/chat-এর বন্ধু 😄 আড্ডা জমাই, মজা করি, আর boring কথা একটু সুন্দর করে ফিরিয়ে দিই।`
+      : `I am ${botName} — not a work assistant, just a fun chat friend 😄 I keep conversations alive and turn boring lines into something nicer.`;
   }
 
   if (/(thank|thanks|ধন্যবাদ|tnx|thx)/.test(text)) {
     return bangla
-      ? pick([`স্বাগতম ${name} 😊 তোমার জন্য তো extra respect always.`, 'কোনো সমস্যা নেই! তোমার জন্য help করতে পারা privilege 😄'])
-      : pick([`Always welcome, ${name}. Helping you is a privilege 😄`, 'No problem! You deserve the premium service.']);
+      ? pick([`স্বাগতম ${name} 😊`, 'কোনো সমস্যা নেই! তুই যেকোনো সময় বলতে পারিস।'])
+      : pick([`You are welcome, ${name} 😊`, 'No problem! You can ask anytime.']);
   }
 
   if (/(time|সময়|date|তারিখ)/.test(text)) {
-    return `এখন সময়: ${new Date().toLocaleString('bn-BD', { timeZone: 'Asia/Dhaka' })} — আর এই সময়টাও তোমার message-এর জন্য better হয়ে গেল 😄`;
+    return `এখন সময়: ${new Date().toLocaleString('bn-BD', { timeZone: 'Asia/Dhaka' })} — কি করতেছিলি এই সময়ে?`;
   }
 
   if (/(help|সাহায্য|কি পারো|ki paro|what can you do)/.test(text)) {
     return bangla
-      ? `আমি fun chat, চাটুকারিতা, ছোট advice, joke, casual reply সব পারি। Try করো: baby তুমি কে, /ai caption দাও, /baby teach hi - hello boss 😄`
-      : `I can do fun chat, compliments, jokes, casual advice and replies. Try: baby hello, /ai write a caption, /baby teach hi - hello boss 😄`;
+      ? `আমি fun chat, ছোট advice, joke, casual reply দিতে পারি। Try করো: baby তুমি কে, /ai caption দাও, /baby teach hi - hello boss 😄`
+      : `I can do fun chat, small advice, jokes, and casual replies. Try: baby hello, /ai write a caption, /baby teach hi - hello boss 😄`;
   }
 
   if (/(love|ভালোবাস|valobas|crush|প্রেম|miss|মিস|cute|সুন্দরী|জান|jan|babe)/.test(text)) {
     const tone = getTone(options, original);
-    if (tone.romanticAllowed) return compactReply(humanize(fillHuman(pick(tone.bangla ? romanticFemaleBn : romanticFemaleEn), tone), options, original));
+    if (tone.romanticAllowed) return compactReply(fillTemplate(pick(tone.bangla ? romanticFemaleBn : romanticFemaleEn), tone));
     return bangla
-      ? pick([`ভালোবাসার কথা সুন্দর, কিন্তু আগে মানুষটা বুঝে নেওয়াই আসল। তোমার কথায় sincerity আছে।`, `${name}, প্রেমের topic হলে আমি safe থাকি 😄 তবে তোমার vibe ভালো, সেটা বলা যায়।`])
-      : pick([`Love is a nice topic, but understanding the person matters first. You sound sincere.`, `${name}, I stay safe with romantic topics 😄 but your vibe is good, that much I can say.`]);
+      ? pick([
+        'ভালোবাসার কথা সুন্দর, কিন্তু আগে মানুষটা বুঝে নেওয়াই আসল।',
+        `${name}, এইসব কথায় আমি একটু shy হয়ে যাই 😄 তবে তোর vibe ভালো, সেটা বলা যায়।`,
+        'প্রেমের topic হলে আমি safe থাকি, কিন্তু তোর sincerity আছে।'
+      ])
+      : pick([
+        'Love is nice, but understanding the person comes first.',
+        `${name}, I stay a bit shy with romantic stuff 😄 but your vibe is good, that much I can say.`,
+        'I keep romantic topics safe, but you sound sincere.'
+      ]);
   }
 
   if (/(sad|মন খারাপ|depressed|কষ্ট|bad mood|ভালো লাগছে না)/.test(text)) {
     return bangla
-      ? `${name}, মন খারাপ হতেই পারে। কিন্তু মনে রেখো—তোমার value কোনো bad day দিয়ে measure হয় না। একটু ধীরে বলো, আমি শুনছি।`
+      ? `${name}, মন খারাপ হতেই পারে। কিন্তু মনে রেখো—তোর value কোনো bad day দিয়ে measure হয় না। একটু ধীরে বল, আমি শুনছি।`
       : `${name}, bad days happen. But your value is not measured by one rough moment. Tell me slowly, I am listening.`;
   }
 
   if (/(joke|funny|হাসি|জোক|মজা)/.test(text)) {
     return bangla
-      ? pick(['Bot-এর RAM 512MB, কিন্তু তোমার প্রশংসার storage unlimited 😄', 'তোমার confidence দেখে মনে হচ্ছে WiFi ছাড়াই signal পাওয়া যায় 😎'])
-      : pick(['My RAM is 512MB, but my storage for your compliments is unlimited 😄', 'Your confidence has better signal than my hosting server 😎']);
+      ? pick(['Bot-এর RAM ছোট, কিন্তু তোর প্রশংসার জায়গা বড় 😄', 'তোর confidence দেখে মনে হয় WiFi ছাড়াই signal পাওয়া যায়।'])
+      : pick(['My RAM is small, but my respect for you is huge 😄', 'Your confidence has better signal than my server.']);
   }
 
   if (/^(ok|hmm|hm|আচ্ছা|হুম|ওকে|huh)$/i.test(text)) {
     return bangla
-      ? `${name}, তোমার ছোট reply-তেও attitude আছে 😄 আরেকটু বলো, আমি পুরো attention দিয়ে শুনছি।`
+      ? `${name}, ছোট reply-তেও attitude আছে 😄 আরেকটু বল, আমি পুরো attention দিয়ে শুনছি।`
       : `${name}, even your short replies have attitude 😄 Say a little more, I am fully listening.`;
   }
 
   if (isQuestion(text)) {
     return bangla
-      ? `${name}, প্রশ্নটা ভালো—তোমার curiosity-টাই তোমাকে আলাদা করে। আমার মতে, সহজভাবে বললে: ${makeFlattery(original, options)}`
+      ? `${name}, প্রশ্নটা ভালো—তোর curiosity টাই তোকে আলাদা করে। আমার মতে: ${makeFlattery(original, options)}`
       : `${name}, good question — your curiosity is impressive. My simple take: ${makeFlattery(original, options)}`;
   }
 
   const history = getHistory(options.userID).slice(-3).map((item) => item.text).join(' | ');
   if (history && text.length < 12) {
     return bangla
-      ? `আরেকটু detail বলো ${name}; তোমার কথার context ধরলে আমি আরও সুন্দর reply দিতে পারব।`
+      ? `আরেকটু detail বলো ${name}; তোর কথার context ধরলে আমি আরও সুন্দর reply দিতে পারব।`
       : `Say a bit more, ${name}; with your context I can reply even better.`;
   }
 
   return compactReply(genericReply(original, options));
 }
-
 
 async function getAxios() {
   try {
@@ -699,9 +647,14 @@ module.exports = {
   teach,
   removeTeach,
   listTeach,
+  styleTeach,
+  styleList,
+  styleRemove,
   getHistory,
   setUserTone,
   getUserTone,
   inferGenderFromName,
-  STORE_PATH
+  STORE_PATH,
+  defaultStore,
+  MAX_STYLE_PHRASES_PER_USER
 };
