@@ -1,0 +1,25 @@
+# Runtime secrets and generated session data
+.secrets/
+.env
+.env.*
+!.env.example
+appstate.json
+*.sqlite
+*.sqlite-journal
+config.json.temp
+
+# Dependency/cache output
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.cache/
+coverage/
+dist/
+build/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

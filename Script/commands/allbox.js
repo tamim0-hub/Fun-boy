@@ -13,7 +13,7 @@ module.exports.handleReply = async function ({ api, event, args, Threads, handle
   const { threadID, messageID } = event;
   if (parseInt(event.senderID) !== parseInt(handleReply.author)) return;
   const moment = require("moment-timezone");
-  const time = moment.tz("Asia/Dhaka").format("HH:MM:ss L");
+  const time = moment.tz("Asia/Dhaka").format("HH:mm:ss L");
   var arg = event.body.split(" ");
   var idgr = handleReply.groupid[arg[1] - 1];
   var groupName = handleReply.groupName[arg[1] - 1];
