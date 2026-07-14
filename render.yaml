@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: fun-boy-bot
+    env: node
+    plan: free
+    branch: main
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: BOT_OLD_SPACE_MB
+        value: 384
+      - key: MEMORY_RSS_LIMIT_MB
+        value: 460
+      - key: MEMORY_HEAP_LIMIT_MB
+        value: 352
+      - key: MALLOC_ARENA_MAX
+        value: 2
+      - key: MAX_RESTARTS
+        value: 50
+      - key: RESTART_DELAY_MS
+        value: 5000
+    healthCheckPath: /health
+    autoDeploy: true
+    numInstances: 1

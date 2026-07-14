@@ -1,11 +1,11 @@
 {
   "name": "fun-boy-bot",
   "version": "10.1.1",
-  "description": "Modernized Fun Boy Messenger bot with encrypted credential support",
+  "description": "Modernized Fun Boy Messenger bot with encrypted credential support - Render deploy ready",
   "main": "Cyber.js",
   "engines": {
     "node": "20.x",
-    "npm": "10.0.0"
+    "npm": ">=10.0.0"
   },
   "scripts": {
     "start": "node Ullash.js",
@@ -13,22 +13,19 @@
     "login:setup": "node scripts/setup-login.js",
     "check": "node scripts/check-syntax.js",
     "test": "npm run check",
-    "postinstall": "node scripts/fix-uuid.js || true"
+    "postinstall": "node scripts/fix-uuid.js || true",
+    "render-build": "npm install"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/cyber-ullash/CYBER-BOT-COMMUNITY.git"
+    "url": "https://github.com/tamim0-hub/Fun-boy.git"
   },
   "keywords": [
     "bot",
     "facebook",
-    "ullashproject",
     "messenger",
-    "javasvript",
-    "ullash",
-    "cyberullash",
-    "cyberRajib ",
-    "islamick chat bot"
+    "render",
+    "fun-boy"
   ],
   "author": "Ullash ッ",
   "license": "GPL-3.0",
@@ -41,7 +38,7 @@
     "axios": "^1.18.1",
     "body-parser": "^1.20.0",
     "caesar-salad": "^2.1.0",
-    "canvas": "^2.9.3",
+    "canvas": "^2.11.2",
     "chalk": "^4.1.2",
     "chalkercli": "^1.6.4",
     "cheerio": "^1.2.0",
@@ -120,7 +117,6 @@
       "tough-cookie": "^4.1.4",
       "uuid": "3.3.2"
     },
-    "request>uuid": "3.3.2",
     "uuid": "3.3.2",
     "axios": "^1.18.1",
     "tough-cookie": "^4.1.4",
